@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>SwipeCards</title>
+    <!-- Tailwind CSS (CDN) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Lucide Icons (CDN) -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Tailwind Config for Custom Styling -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        iosBlue: '#007AFF',
+                        iosGreen: '#34C759',
+                        iosRed: '#FF3B30',
+                        iosGray: '#8E8E93',
+                        iosBg: '#F2F2F7',
+                        iosCard: '#FFFFFF'
+                    },
+                    boxShadow: {
+                        ios: '0 8px 24px rgba(0, 0, 0, 0.08)',
+                        iosActive: '0 12px 32px rgba(0, 0, 0, 0.15)'
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- Tailwind Custom Utilities (Avoiding raw CSS files) -->
+    <style>
+        /* iOS-like drag transition & hardware acceleration */
+        .card-transition {
+            transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+            will-change: transform, opacity;
+        }
+        /* Hide scrollbars but keep functionality */
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .no-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+    </style>
+</head>
+<body class="bg-iosBg text-black antialiased font-sans select-none overflow-hidden h-screen flex flex-col justify-between">
+
+    <!-- Vue.js 3 (CDN) -->
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+
+    <div id="app" class="flex flex-col h-full w-full max-w-md mx-auto relative px-4 pb- নিরাপদ-領域">
+        
+        <!-- HEADER (HIG Style: Slim & High Contrast Header) -->
+        <header class="flex justify-between items-center py-4 shrink-0">
+            <div>
+                <h1 class="text-2xl font-bold tracking-tight">SwipeCards</h1>
+                <p class="text-xs text-iosGray">残りのカード: {{ activeDeck.length }}枚</p>
+            </div>
+            <!-- Statistics Modal Trigger -->
+            <button @click="openStats = true" class="w-10 h-10 rounded-full bg-white flex items-center justify-center shadow-sm active:scale-95 transition-transform" aria-label="ダッシュボードを開く">
+                <i data-lucide="bar-chart-3" class="w-5 h-5 text-iosBlue"></i>
+            </button>
+        </header>
+
+        <!-- MAIN SWIPE AREA (Tinder UI) -->
+        <main class="flex-1 flex flex-col justify-center items-center relative min-h-[320px]">
+            
+            <div v-if="activeDeck.length > 0" class="relative w-full h-[360px] flex justify-center items-center">
+                <!-- Under Card (Visual Stack Effect) -->
+                <div v-if="activeDeck.length > 1" 
+                     class="absolute w-11/12 h-[340px] bg-iosCard rounded-3xl shadow-ios border border-black/5 flex items-center justify-center pointer-events-none transform translate-y-4 scale-95 opacity-80 transition-all duration-300">
+                </div>
+
+                <!-- Top Card (Draggable Container) -->
+                <div 
+                    ref="swipeCard"
+                    class="absolute w-full h-[340px] bg-iosCard rounded-3xl shadow-ios border border-black/5 flex flex-col justify-between p-8 cursor-grab active:cursor-grabbing card-transition"
+                    :style="cardStyle"
+                    @mousedown="startDrag"
+                    @touchstart="startDrag"
+                >
+                    <!-- Badges appearing during drag -->
+                    <div class="flex justify-between items-center w-full pointer-events-none">
+                        <span class="border-2 border-iosGreen text-iosGreen font-bold rounded px-3 py-1 text-xs uppercase tracking-wider transition-opacity" :style="{ opacity: greenBadgeOpacity }">覚えた</span>
+                        <span class="border-2 border-iosRed text-iosRed font-bold rounded px-3 py-1 text-xs uppercase tracking-wider transition-opacity" :style="{ opacity: redBadgeOpacity }">苦手</span>
+                    </div>
+
+                    <!-- Card Word -->
+                    <div class="flex-1 flex items-center justify-center text-center pointer-events-none">
+                        <h2 class="text-3xl font-extrabold tracking-tight break-words max-w-full px-2">{{ currentCard.word }}</h2>
+                    </div>
+
+                    <!-- Bottom Indicator of Card -->
+                    <div class="flex justify-between items-center text-xs text-iosGray pointer-events-none">
+                        <span>← 苦手 (要復習)</span>
+                        <span class="bg-iosBg px-2.5 py-1 rounded-full flex items-center gap-1">
+                            <i data-lucide="zap" class="w-3.5 h-3.5 text-amber-500"></i>
+                            {{ currentCard.streak || 0 }}
+                        </span>
+                        <span>覚えた →</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Empty State (When All Cards Cleared) -->
+            <div v-else class="flex flex-col items-center justify-center text-center p-8 bg-iosCard rounded-3xl shadow-ios w-full h-[340px] border border-black/5 animate-fade-in">
+                <div class="w-16 h-16 bg-iosGreen/10 rounded-full flex items-center justify-center mb-4">
+                    <i data-lucide="check-circle-2" class="w-10 h-10 text-iosGreen animate-bounce"></i>
+                </div>
+                <h3 class="text-xl font-bold mb-2">全カード仕分け完了！</h3>
+                <p class="text-sm text-iosGray mb-6">すべての単語を「覚えた」に仕分けました！新しいカードを追加するか、リセットしてやり直しましょう。</p>
+                <button @click="resetSession" class="px-6 py-3 bg-iosBlue text-white font-semibold rounded-full active:scale-95 transition-transform shadow-md hover:shadow-lg flex items-center gap-2">
+                    <i data-lucide="rotate-ccw" class="w-4 h-4"></i>
+                    セッションを再開する
+                </button>
+            </div>
+
+        </main>
+
+        <!-- CONTROLS & ADD FORM AREA (HIG Style Compact Bottom Layout) -->
+        <footer class="mt-4 mb-6 shrink-0 flex flex-col gap-4">
+            
+            <!-- Undo & Quick Drag Trigger Action Buttons -->
+            <div class="flex justify-center items-center gap-6">
+                <!-- Force Left (Reject) -->
+                <button @click="triggerSwipe('left')" :disabled="activeDeck.length === 0" class="w-14 h-14 bg-white rounded-full flex items-center justify-center shadow-md border border-black/5 text-iosRed active:scale-90 disabled:opacity-50 disabled:pointer-events-none transition-all">
+                    <i data-lucide="x" class="w-6 h-6"></i>
+                </button>
+                
+                <!-- Undo Button -->
+                <button @click="undoAction" :disabled="history.length === 0" class="px-5 py-2.5 bg-white rounded-full flex items-center gap-2 shadow-sm border border-black/5 text-iosGray active:scale-95 disabled:opacity-30 disabled:pointer-events-none transition-all text-sm font-medium">
+                    <i data-lucide="undo-2" class="w-4 h-4"></i>
+                    元に戻す
+                </button>
+
+                <!-- Force Right (Accept) -->
+                <button @click="triggerSwipe('right')" :disabled="activeDeck.length === 0" class="w-14 h-14 bg-white rounded-full flex items-center justify-center shadow-md border border-black/5 text-iosGreen active:scale-90 disabled:opacity-50 disabled:pointer-events-none transition-all">
+                    <i data-lucide="heart" class="w-6 h-6 fill-current"></i>
+                </button>
+            </div>
+
+            <!-- Instant Word Register Form -->
+            <form @submit.prevent="addWord" class="flex gap-2 bg-white p-1.5 rounded-full shadow-sm border border-black/5 focus-within:ring-2 focus-within:ring-iosBlue/30 transition-shadow">
+                <input 
+                    type="text" 
+                    v-model="newWord" 
+                    placeholder="単語を入力してEnterで即登録..." 
+                    class="flex-1 bg-transparent border-0 outline-none px-4 py-2 text-sm text-black placeholder:text-iosGray"
+                    maxlength="50"
+                >
+                <button type="submit" class="w-9 h-9 bg-iosBlue text-white rounded-full flex items-center justify-center active:scale-95 transition-transform" aria-label="単語を追加">
+                    <i data-lucide="plus" class="w-5 h-5"></i>
+                </button>
+            </form>
+
+        </footer>
+
+        <!-- STATISTICS & WORD LIST MODAL -->
+        <transition enter-active-class="transition duration-300 ease-out" enter-from-class="transform translate-y-full" enter-to-class="transform translate-y-0" leave-active-class="transition duration-200 ease-in" leave-from-class="transform translate-y-0" leave-to-class="transform translate-y-full">
+            <div v-if="openStats" class="absolute inset-0 bg-iosBg z-50 flex flex-col pt-10">
+                <div class="px-6 flex justify-between items-center border-b border-black/5 pb-4">
+                    <h2 class="text-xl font-bold">ダッシュボード</h2>
+                    <button @click="openStats = false" class="px-4 py-1.5 bg-black/5 text-black rounded-full text-xs font-semibold active:scale-95 transition-transform">
+                        閉じる
+                    </button>
+                </div>
+
+                <div class="flex-1 overflow-y-auto p-6 space-y-6 no-scrollbar">
+                    
+                    <!-- Stats Summary Grid -->
+                    <div class="grid grid-cols-2 gap-4">
+                        <div class="bg-white p-4 rounded-2xl border border-black/5">
+                            <span class="text-xs text-iosGray">登録単語数</span>
+                            <p class="text-2xl font-bold">{{ words.length }}<span class="text-xs font-normal text-iosGray ml-1">語</span></p>
+                        </div>
+                        <div class="bg-white p-4 rounded-2xl border border-black/5">
+                            <span class="text-xs text-iosGray">累計苦手カウント</span>
+                            <p class="text-2xl font-bold text-iosRed">{{ totalStreak }}<span class="text-xs font-normal text-iosGray ml-1">回</span></p>
+                        </div>
+                    </div>
+
+                    <!-- Word List and Control Table -->
+                    <div class="space-y-3">
+                        <div class="flex justify-between items-center">
+                            <h3 class="text-sm font-semibold text-iosGray">登録中の単語一覧</h3>
+                            <button @click="clearAllWords" class="text-xs text-iosRed font-semibold active:opacity-70">
+                                すべて削除
+                            </button>
+                        </div>
+                        
+                        <div v-if="words.length > 0" class="space-y-2">
+                            <div v-for="wordObj in sortedWords" :key="wordObj.id" class="flex justify-between items-center bg-white p-4 rounded-2xl border border-black/5">
+                                <div class="truncate pr-4">
+                                    <span class="font-semibold text-sm">{{ wordObj.word }}</span>
+                                </div>
+                                <div class="flex items-center gap-3 shrink-0">
+                                    <span v-if="wordObj.streak > 0" class="text-xs bg-iosRed/10 text-iosRed px-2.5 py-1 rounded-full font-bold flex items-center gap-1">
+                                        <i data-lucide="zap" class="w-3.5 h-3.5"></i>
+                                        {{ wordObj.streak }}
+                                    </span>
+                                    <button @click="deleteWord(wordObj.id)" class="text-iosGray hover:text-iosRed p-1 active:scale-90 transition-transform">
+                                        <i data-lucide="trash-2" class="w-4 h-4"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div v-else class="text-center py-8 text-iosGray text-xs">
+                            単語が登録されていません。最初の単語を登録しましょう！
+                        </div>
+
+                    </div>
+                </div>
+            </div>
+        </transition>
+
+        <!-- Version Footer Notice -->
+        <div class="absolute bottom-1 left-0 right-0 text-center pointer-events-none">
+            <span class="text-[9px] text-iosGray opacity-40">v1.0.4</span>
+        </div>
+
+    </div>
+
+    <script>
+        const { createApp, ref, computed, onMounted, nextTick } = Vue;
+
+        createApp({
+            setup() {
+                // Persistent Words Data from LocalStorage
+                const words = ref(JSON.parse(localStorage.getItem('swipe_cards_words')) || [
+                    { id: 1, word: 'apple', streak: 0 },
+                    { id: 2, word: 'banana', streak: 0 },
+                    { id: 3, word: 'orange', streak: 0 }
+                ]);
+
+                // Active Deck for the current session (looping)
+                const activeDeck = ref([...words.value]);
+
+                // Form values & UI status variables
+                const newWord = ref('');
+                const openStats = ref(false);
+                const history = ref([]); // Undo stack tracking { action: 'right'|'left', word: object }
+
+                // Tinder Drag Physics States
+                const isDragging = ref(false);
+                const startX = ref(0);
+                const currentX = ref(0);
+                const cardStyle = ref({});
+                const greenBadgeOpacity = ref(0);
+                const redBadgeOpacity = ref(0);
+
+                // Safe Reference Getter for top card
+                const currentCard = computed(() => {
+                    return activeDeck.value[0] || null;
+                });
+
+                // Overall total mistakes statistics computation
+                const totalStreak = computed(() => {
+                    return words.value.reduce((acc, curr) => acc + (curr.streak || 0), 0);
+                });
+
+                // Display Sort: Show worst cards first in the dashboard
+                const sortedWords = computed(() => {
+                    return [...words.value].sort((a, b) => (b.streak || 0) - (a.streak || 0));
+                });
+
+                // LocalStorage Synchronizer
+                const saveToLocal = () => {
+                    localStorage.setItem('swipe_cards_words', JSON.stringify(words.value));
+                    nextTick(() => lucide.createIcons());
+                };
+
+                // Add word validation & processing
+                const addWord = () => {
+                    const trimmed = newWord.value.trim();
+                    if (!trimmed) return;
+                    
+                    const duplicate = words.value.find(w => w.word.toLowerCase() === trimmed.toLowerCase());
+                    if (duplicate) {
+                        alert('この単語は既に登録されています');
+                        return;
+                    }
+
+                    const newObj = { id: Date.now(), word: trimmed, streak: 0 };
+                    words.value.push(newObj);
+                    activeDeck.value.push(newObj);
+                    newWord.value = '';
+                    saveToLocal();
+                };
+
+                // Remove targeted word
+                const deleteWord = (id) => {
+                    words.value = words.value.filter(w => w.id !== id);
+                    activeDeck.value = activeDeck.value.filter(w => w.id !== id);
+                    saveToLocal();
+                };
+
+                // Clean the store totally
+                const clearAllWords = () => {
+                    if (confirm('すべての登録データをクリアします。よろしいですか？')) {
+                        words.value = [];
+                        activeDeck.value = [];
+                        history.value = [];
+                        saveToLocal();
+                    }
+                };
+
+                // Reactivate session deck with current pool
+                const resetSession = () => {
+                    activeDeck.value = [...words.value];
+                    history.value = [];
+                    nextTick(() => lucide.createIcons());
+                };
+
+                // Handle Swiping Physics Actions
+                const startDrag = (event) => {
+                    if (activeDeck.value.length === 0) return;
+                    isDragging.value = true;
+                    const clientX = event.touches ? event.touches[0].clientX : event.clientX;
+                    startX.value = clientX;
+                    currentX.value = clientX;
+
+                    // Remove transition classes for immediate manual interaction tracking
+                    cardStyle.value = { transition: 'none' };
+
+                    if (event.touches) {
+                        document.addEventListener('touchmove', handleDrag, { passive: false });
+                        document.addEventListener('touchend', endDrag);
+                    } else {
+                        document.addEventListener('mousemove', handleDrag);
+                        document.addEventListener('mouseup', endDrag);
+                    }
+                };
+
+                const handleDrag = (event) => {
+                    if (!isDragging.value) return;
+                    // Prevent page scroll during swiping interaction
+                    if (event.cancelable) event.preventDefault();
+                    
+                    const clientX = event.touches ? event.touches[0].clientX : event.clientX;
+                    currentX.value = clientX;
+                    const deltaX = currentX.value - startX.value;
+
+                    // Compute dynamic rotation
+                    const rotate = deltaX * 0.08;
+                    cardStyle.value = {
+                        transform: `translateX(${deltaX}px) rotate(${rotate}deg)`,
+                        transition: 'none'
+                    };
+
+                    // Compute visible badge opacity
+                    if (deltaX > 0) {
+                        greenBadgeOpacity.value = Math.min(deltaX / 80, 1);
+                        redBadgeOpacity.value = 0;
+                    } else {
+                        redBadgeOpacity.value = Math.min(Math.abs(deltaX) / 80, 1);
+                        greenBadgeOpacity.value = 0;
+                    }
+                };
+
+                const endDrag = () => {
+                    if (!isDragging.value) return;
+                    isDragging.value = false;
+
+                    const deltaX = currentX.value - startX.value;
+                    const threshold = window.innerWidth * 0.25;
+
+                    // Swipe validation thresholds check
+                    if (deltaX > threshold) {
+                        swipeOut('right');
+                    } else if (deltaX < -threshold) {
+                        swipeOut('left');
+                    } else {
+                        // Return with smooth bounce back animation
+                        cardStyle.value = {
+                            transform: 'translateX(0px) rotate(0deg)',
+                            transition: 'all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)'
+                        };
+                        greenBadgeOpacity.value = 0;
+                        redBadgeOpacity.value = 0;
+                    }
+
+                    document.removeEventListener('mousemove', handleDrag);
+                    document.removeEventListener('mouseup', endDrag);
+                    document.removeEventListener('touchmove', handleDrag);
+                    document.removeEventListener('touchend', endDrag);
+                };
+
+                // Slide animation offscreen action trigger
+                const swipeOut = (direction) => {
+                    const translateVal = direction === 'right' ? window.innerWidth + 200 : -window.innerWidth - 200;
+                    const rotateVal = direction === 'right' ? 30 : -30;
+
+                    cardStyle.value = {
+                        transform: `translateX(${translateVal}px) rotate(${rotateVal}deg)`,
+                        opacity: '0',
+                        transition: 'all 0.3s ease-in'
+                    };
+
+                    setTimeout(() => {
+                        handleSwipeCompletion(direction);
+                    }, 300);
+                };
+
+                // Pure program buttons dynamic trigger
+                const triggerSwipe = (direction) => {
+                    if (activeDeck.value.length === 0) return;
+                    if (direction === 'right') {
+                        greenBadgeOpacity.value = 1;
+                    } else {
+                        redBadgeOpacity.value = 1;
+                    }
+                    swipeOut(direction);
+                };
+
+                // Swiping Logic and Looping implementation
+                const handleSwipeCompletion = (direction) => {
+                    const card = activeDeck.value.shift();
+                    if (!card) return;
+
+                    // Push state to history for undo recovery
+                    history.value.push({
+                        action: direction,
+                        word: card
+                    });
+
+                    if (direction === 'left') {
+                        // Increment core user mistake counter
+                        const matchedWord = words.value.find(w => w.id === card.id);
+                        if (matchedWord) {
+                            matchedWord.streak = (matchedWord.streak || 0) + 1;
+                        }
+                        
+                        // Push loop back to bottom of queue
+                        activeDeck.value.push(card);
+                        saveToLocal();
+                    }
+
+                    // Reset positioning style states cleanly
+                    cardStyle.value = {};
+                    greenBadgeOpacity.value = 0;
+                    redBadgeOpacity.value = 0;
+                    
+                    nextTick(() => lucide.createIcons());
+                };
+
+                // Recover previous action state
+                const undoAction = () => {
+                    if (history.value.length === 0) return;
+                    const lastAction = history.value.pop();
+                    const card = lastAction.word;
+
+                    if (lastAction.action === 'left') {
+                        // Revert active looping registry order
+                        activeDeck.value.pop(); // Remove bottom duplicate loop element
+                        activeDeck.value.unshift(card); // Reinsert to active top position
+
+                        // Decouple mistake tracker step safely
+                        const matchedWord = words.value.find(w => w.id === card.id);
+                        if (matchedWord && matchedWord.streak > 0) {
+                            matchedWord.streak -= 1;
+                        }
+                        saveToLocal();
+                    } else {
+                        // If it was accepted previously, slide it back into active deck
+                        activeDeck.value.unshift(card);
+                    }
+
+                    // Slide top card in transition effect
+                    cardStyle.value = {
+                        transform: 'translateX(0px) rotate(0deg)',
+                        opacity: '1'
+                    };
+                    nextTick(() => lucide.createIcons());
+                };
+
+                onMounted(() => {
+                    // Initialize Lucide Icons for HTML CDN use
+                    lucide.createIcons();
+                });
+
+                return {
+                    words,
+                    activeDeck,
+                    newWord,
+                    openStats,
+                    history,
+                    currentCard,
+                    totalStreak,
+                    sortedWords,
+                    cardStyle,
+                    greenBadgeOpacity,
+                    redBadgeOpacity,
+                    addWord,
+                    deleteWord,
+                    clearAllWords,
+                    resetSession,
+                    startDrag,
+                    triggerSwipe,
+                    undoAction
+                };
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
